@@ -1,0 +1,324 @@
+<html lang='en'>
+  <head>
+    <meta charset='UTF-8' />
+    <meta http-equiv='X-UA-Compatible' content='IE=edge' />
+    <meta name='viewport' content='width=device-width, initial-scale=1.0' />
+    <script src='https://d3js.org/d3.v7.min.js'></script>
+   
+  
+    <style>
+      .axis-label {
+        font-size: 12;
+        fill: black;
+        text-anchor: end;
+        font-weight: bold;
+      }
+
+      .control{
+          display: flex;
+          column-gap: 10px;
+      }
+
+      .title{
+        margin-left: 350px;
+      }
+      
+    </style>
+    <title>How Time Is Spent</title>
+  </head>
+  <body>
+  <script>
+
+  //loading in the data using d3
+  d3.csv('TimeUse.csv').then((data) => {
+      chart("#chart", data);
+    });
+
+  //starting the chart function
+  function chart(containerSelector, rawdata) {
+
+  //dropdown options and setting the default option when you load in
+  let genders = ["Males", "Females"];
+  let genderSelected = "Males";
+
+  let countries;
+  let countrySelected;
+
+  //x axis activities
+  let activities;
+
+  //data process
+  const processed = dataProcess(rawdata);
+  const data = processed.data;
+  countries = processed.countries;
+
+  //countrySelected is default option when you load in
+  countrySelected = countries[0];
+  activities = processed.activities;
+
+  //creating the chart
+  const margin = { top: 50, right: 100, bottom: 250, left: 50 };
+  const width = 1200;
+  const height =800;
+  const innerWidth = width - margin.left - margin.right;
+  const innerHeight = height - margin.top - margin.bottom;
+
+  //container
+  const container = d3.select(containerSelector);
+
+  //chart svg
+  const svg = container
+    .append("svg")
+    .attr("width", width)
+    .attr("height", height);
+
+  const gInner = svg
+    .append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+  const gYAxis = svg
+    .append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`)
+    .call((g) => {
+      g.append("text")
+        .attr("class", "axis-label")
+        .attr("y", -12)
+        .text("Minutes");
+    });
+
+  const gXAxis = svg
+    .append("g")
+    .attr("transform", `translate(${margin.left},${margin.top + innerHeight})`);
+
+  //creating the dropdown option selectors
+  const dropdown = container
+    .append("div")
+    .attr("class", "control")
+    .style("padding-left", margin.left)
+    .style("padding-right", margin.right);
+
+  //making the dropdown option for the different genders
+  dropdown
+    .append("span")
+    .call(
+      createDropdown,
+      "Gender",
+      genders,
+      genderSelected,
+      (e) => (genderSelected = e.target.value)
+    );
+
+  //making the dropdown option for the different countries
+  dropdown
+    .append("span")
+    .call(
+      createDropdown,
+      "Country",
+      countries,
+      countrySelected,
+      (e) => (countrySelected = e.target.value)
+    );
+
+  //scale
+  const color = d3
+    .scaleOrdinal()
+    .domain(genders)
+    .range(["#0026E6", "#CC00CC"]);
+
+  const xScale = d3
+    .scaleBand()
+    .domain(activities)
+    .range([0, innerWidth])
+    .padding(0.2);
+
+  const yScale = d3.scaleLinear().range([innerHeight, 0]);
+
+  updateChart();
+
+  function updateChart() {
+    const dataSelected = data[genderSelected][countrySelected];
+    if (!Array.isArray(dataSelected)) return;
+
+  //updating the y axis
+      let [minValue, maxValue] = d3.extent(
+        Object.values(data.Males).flat(),
+        (d) => d.value
+      );
+    if (minValue === maxValue) {
+      minValue = minValue || 0;
+      maxValue = minValue + 1;
+    }
+    minValue = Math.min(0, minValue);
+
+    yScale.domain([minValue, maxValue]).nice();
+
+    gYAxis.transition().call(d3.axisLeft(yScale));
+
+    //making the bars
+    const bar = gInner.selectAll("rect.bar").data(dataSelected, (d) => d.key);
+    const barEnter = bar.enter().append("rect").attr("class", "bar");
+    const barUpdate = bar.merge(barEnter);
+    bar.exit().remove();
+
+    barEnter
+      .attr("fill", color(genderSelected))
+      .attr("x", (d) => xScale(d.key))
+      .attr("y", yScale(0))
+      .attr("width", xScale.bandwidth())
+      .attr("height", 0);
+
+    barUpdate
+      .transition()
+      .attr("fill", color(genderSelected))
+      .attr("x", (d) => xScale(d.key))
+      .attr("y", (d) => (d.value >= 0 ? yScale(d.value) : yScale(0)))
+      .attr("width", xScale.bandwidth())
+      .attr("height", (d) => Math.abs(yScale(d.value) - yScale(0)));
+
+    //x axis
+    gXAxis.call(d3.axisBottom(xScale));
+    gXAxis.selectAll(".tick line").remove();
+    gXAxis
+      .selectAll(".tick text")
+      .attr("transform", `rotate(75)`)
+      .attr("dominant-baseline", "middle")
+      .attr("text-anchor", "start")
+      .attr("y", 0)
+      .text((d) => (d.length > 45 ? d.slice(0, 45) + "..." : d));
+  }
+
+  function createDropdown(
+    parentEl,
+    labelText,
+    options,
+    defaultOption,
+    onChangeHandler = () => {}
+  ) {
+    parentEl.append("label").attr("for", labelText).text(labelText+": ");
+
+    const selectEl = parentEl
+      .append("select")
+      .attr("id", labelText)
+      .attr("name", labelText)
+      .on("change", (e) => {
+        onChangeHandler(e);
+        updateChart();
+      });
+
+    selectEl
+      .selectAll("option")
+      .data(options)
+      .join("option")
+      .attr("value", (d) => d)
+      .property("selected", (d) => d == defaultOption)
+      .text((d) => d);
+  }
+
+  function dataProcess(raw) {
+    //countries
+    const countries = [...new Set(raw.map((d) => d["GEO/ACL00"]))];
+
+    //list of activities
+    const activities = [
+      "Personal care",
+      "Sleep",
+      "Eating",
+      "Other and/or unspecified personal care",
+      "Employment, related activities and travel as part of/during main and second job",
+      "Main and second job and related travel",
+      "Activities related to employment and unspecified employment",
+      "Study",
+      "School and university except homework",
+      "Homework",
+      "Free time study",
+      "Household and family care",
+      "Food management except dish washing",
+      "Dish washing",
+      "Cleaning dwelling",
+      "Household upkeep except cleaning dwelling",
+      "Laundry",
+      "Ironing",
+      "Handicraft and producing textiles and other care for textiles",
+      "Gardening; other pet care",
+      "Tending domestic animals",
+      "Caring for pets",
+      "Walking the dog",
+      "Construction and repairs ",
+      "Shopping and services",
+      "Childcare, except teaching, reading and talking",
+      "Teaching, reading and talking with child",
+      "Household management and help family member",
+      "Leisure, social and associative life",
+      "Organisational work",
+      "Informal help to other households",
+      "Participatory activities",
+      "Visiting and feasts",
+      "Other social life",
+      "Entertainment and culture",
+      "Resting",
+      "Walking and hiking",
+      "Sports and outdoor activities except walking and hiking",
+      "Computer games",
+      "Computing",
+      "Hobbies and games except computing and computer games",
+      "Reading books",
+      "Reading, except books",
+      "TV and video",
+      "Radio and music",
+      "Unspecified leisure ",
+      "Travel except travel related to jobs",
+      "Travel to/from work",
+      "Travel related to study",
+      "Travel related to shopping and services",
+      "Transporting a child",
+      "Travel related to other household purposes",
+      "Travel related to leisure, social and associative life",
+      "Unspecified travel",
+      "Unspecified time use",
+    ];
+
+    //data type convert
+    raw.forEach((d) => {
+      activities.forEach((key) => {
+        const arr = d[key]
+          .trim()
+          .split(":")
+          .map((d) => d * 1);
+
+        let [h, m, s] = [0, 0, 0];
+
+        if (arr.length == 2) [m, s] = arr;
+        else if (arr.length == 3) [h, m, s] = arr;
+        else;
+
+        d[key] = h * 3600 + m * 60 + s;
+      });
+    });
+
+    //data
+    const data = {};
+    genders.forEach((gender) => {
+      countries.forEach((country) => {
+        if (!data[gender]) data[gender] = {};
+        if (!data[gender][country]) data[gender][country] = [];
+
+        data[gender][country] = activities.map((key) => ({
+          key,
+          value: (gender == "Combined" ? rawCombined : raw).find(
+            (f) => f["SEX"] == gender && f["GEO/ACL00"] == country
+          )?.[key],
+        }));
+      });
+    });
+
+    return { countries, activities, data };
+  }
+}
+
+      </script>
+<h1 class="title">How Time Is Spent in Different Countries</h1>
+<div id='chart'></div></body>
+<p><a href="https://youtu.be/_RFcF90l2n0">Click Here For Youtube Link</a></p>
+<p><a href="Starnes%20_Viz_Documentation.pdf">Click Here For PDF Link</a></p>
+
+</html>
